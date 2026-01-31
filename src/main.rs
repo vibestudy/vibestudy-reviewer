@@ -1,55 +1,41 @@
-use actix_web::{web, App, HttpResponse, HttpServer, Responder};
-use serde::{Deserialize, Serialize};
-
-#[derive(Serialize)]
-struct HealthResponse {
-    status: &'static str,
-}
-
-#[derive(Serialize, Deserialize)]
-struct Message {
-    id: u32,
-    content: String,
-}
-
-async fn health() -> impl Responder {
-    HttpResponse::Ok().json(HealthResponse { status: "ok" })
-}
-
-async fn get_messages() -> impl Responder {
-    let messages = vec![
-        Message { id: 1, content: "Hello, World!".to_string() },
-        Message { id: 2, content: "Welcome to Actix Web".to_string() },
-    ];
-    HttpResponse::Ok().json(messages)
-}
-
-async fn get_message(path: web::Path<u32>) -> impl Responder {
-    let id = path.into_inner();
-    let message = Message {
-        id,
-        content: format!("Message with id: {}", id),
-    };
-    HttpResponse::Ok().json(message)
-}
-
-async fn create_message(body: web::Json<Message>) -> impl Responder {
-    HttpResponse::Created().json(body.into_inner())
-}
+use actix_web::{App, HttpServer, middleware, web};
+use api_server::api;
+use api_server::config::AppConfig;
+use api_server::orchestrator::ReviewStore;
+use api_server::shutdown::shutdown_signal;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    let port = 8080;
-    println!("Starting server at http://localhost:{}", port);
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "api_server=info,actix_web=info".into()),
+        )
+        .with(tracing_subscriber::fmt::layer())
+        .init();
 
-    HttpServer::new(|| {
+    let config = AppConfig::from_env().expect("Failed to load configuration");
+    let review_store = ReviewStore::new(config.review.review_ttl_secs, Some(config.providers.clone()));
+
+    let bind_addr = format!("{}:{}", config.server.host, config.server.port);
+    tracing::info!("Starting server at http://{}", bind_addr);
+
+    let server = HttpServer::new(move || {
         App::new()
-            .route("/health", web::get().to(health))
-            .route("/messages", web::get().to(get_messages))
-            .route("/messages/{id}", web::get().to(get_message))
-            .route("/messages", web::post().to(create_message))
+            .wrap(middleware::Logger::default())
+            .wrap(middleware::Compress::default())
+            .app_data(web::Data::new(review_store.clone()))
+            .configure(api::configure)
     })
-    .bind(("127.0.0.1", port))?
-    .run()
-    .await
+    .bind(&bind_addr)?
+    .run();
+
+    tokio::select! {
+        result = server => result,
+        _ = shutdown_signal() => {
+            tracing::info!("Shutting down gracefully");
+            Ok(())
+        }
+    }
 }
