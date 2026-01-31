@@ -90,7 +90,13 @@ impl ReviewStore {
 
         // Priority: Anthropic > OpenAI > OpenCode
         if let Some(ref api_key) = config.anthropic_api_key {
-            return Some(Box::new(AnthropicClient::with_api_key(api_key.expose_secret())));
+            let key = api_key.expose_secret();
+            // Detect OAuth token vs API key
+            if key.starts_with("sk-ant-oat") {
+                return Some(Box::new(AnthropicClient::with_oauth(key)));
+            } else {
+                return Some(Box::new(AnthropicClient::with_api_key(key)));
+            }
         }
 
         if let Some(ref api_key) = config.openai_api_key {
