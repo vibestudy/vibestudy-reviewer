@@ -21,7 +21,7 @@ pub async fn create_review(
         return Err(ApiError::BadRequest("repo_url is required".to_string()));
     }
 
-    let review_id = store.create_review(request.repo_url.clone(), request.include_ai).await;
+    let review_id = store.create_review(request.repo_url.clone()).await;
 
     let store_clone = store.get_ref().clone();
     let review_id_clone = review_id.clone();

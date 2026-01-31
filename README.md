@@ -45,7 +45,7 @@ GET /api/health
 ```bash
 curl -X POST http://localhost:8080/api/review \
   -H "Content-Type: application/json" \
-  -d '{"repo_url": "https://github.com/user/repo", "include_ai": true}'
+  -d '{"repo_url": "https://github.com/user/repo"}'
 ```
 
 Response:

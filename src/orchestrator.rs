@@ -23,7 +23,6 @@ pub struct ReviewState {
     pub id: String,
     pub status: ReviewStatus,
     pub repo_url: String,
-    pub include_ai: bool,
     pub results: Vec<Diagnostic>,
     pub suggestions: Vec<Suggestion>,
     pub created_at: u64,
@@ -31,13 +30,12 @@ pub struct ReviewState {
 }
 
 impl ReviewState {
-    pub fn new(id: String, repo_url: String, include_ai: bool) -> Self {
+    pub fn new(id: String, repo_url: String) -> Self {
         let (event_sender, _) = broadcast::channel(100);
         Self {
             id,
             status: ReviewStatus::Pending,
             repo_url,
-            include_ai,
             results: Vec::new(),
             suggestions: Vec::new(),
             created_at: SystemTime::now()
@@ -117,9 +115,9 @@ impl ReviewStore {
         reviews.retain(|_, state| now - state.created_at < ttl_secs);
     }
 
-    pub async fn create_review(&self, repo_url: String, include_ai: bool) -> String {
+    pub async fn create_review(&self, repo_url: String) -> String {
         let id = uuid::Uuid::new_v4().to_string();
-        let state = ReviewState::new(id.clone(), repo_url.clone(), include_ai);
+        let state = ReviewState::new(id.clone(), repo_url.clone());
 
         state.emit(ReviewEvent::ReviewStarted {
             review_id: id.clone(),
@@ -138,7 +136,6 @@ impl ReviewStore {
             id: state.id.clone(),
             status: state.status,
             repo_url: state.repo_url.clone(),
-            include_ai: state.include_ai,
             results: state.results.clone(),
             suggestions: state.suggestions.clone(),
             created_at: state.created_at,
@@ -152,11 +149,11 @@ impl ReviewStore {
     }
 
     pub async fn run_review(&self, id: &str) -> Result<(), ApiError> {
-        let (repo_url, include_ai, event_sender) = {
+        let (repo_url, event_sender) = {
             let mut reviews = self.reviews.write().await;
             if let Some(state) = reviews.get_mut(id) {
                 state.status = ReviewStatus::Cloning;
-                (state.repo_url.clone(), state.include_ai, state.event_sender.clone())
+                (state.repo_url.clone(), state.event_sender.clone())
             } else {
                 return Err(ApiError::NotFound(format!("Review {} not found", id)));
             }
@@ -198,23 +195,21 @@ impl ReviewStore {
 
         let mut all_suggestions: Vec<Suggestion> = Vec::new();
 
-        if include_ai {
-            if let Some(llm_client) = self.create_llm_client() {
-                let validated_diagnostics = self.run_ai_validators(
-                    llm_client.as_ref(),
-                    all_diagnostics.clone(),
-                    &event_sender,
-                ).await;
-                all_diagnostics = validated_diagnostics;
+        if let Some(llm_client) = self.create_llm_client() {
+            let validated_diagnostics = self.run_ai_validators(
+                llm_client.as_ref(),
+                all_diagnostics.clone(),
+                &event_sender,
+            ).await;
+            all_diagnostics = validated_diagnostics;
 
-                let code_context = self.build_code_context(&repo_url, &repo_path, &all_diagnostics);
-                let suggestions = self.run_ai_reviewers(
-                    llm_client.as_ref(),
-                    &code_context,
-                    &event_sender,
-                ).await;
-                all_suggestions = suggestions;
-            }
+            let code_context = self.build_code_context(&repo_url, &repo_path, &all_diagnostics);
+            let suggestions = self.run_ai_reviewers(
+                llm_client.as_ref(),
+                &code_context,
+                &event_sender,
+            ).await;
+            all_suggestions = suggestions;
         }
 
         {
@@ -366,7 +361,7 @@ mod tests {
     async fn test_create_and_get_review() {
         let store = ReviewStore::new(3600, None);
         let id = store
-            .create_review("https://github.com/test/repo".to_string(), false)
+            .create_review("https://github.com/test/repo".to_string())
             .await;
 
         let state = store.get_review(&id).await;
@@ -378,7 +373,7 @@ mod tests {
     async fn test_subscribe() {
         let store = ReviewStore::new(3600, None);
         let id = store
-            .create_review("https://github.com/test/repo".to_string(), false)
+            .create_review("https://github.com/test/repo".to_string())
             .await;
 
         let receiver = store.subscribe(&id).await;

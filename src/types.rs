@@ -134,8 +134,6 @@ pub struct ReviewRequest {
     pub repo_url: String,
     #[serde(default)]
     pub branch: Option<String>,
-    #[serde(default)]
-    pub include_ai: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
