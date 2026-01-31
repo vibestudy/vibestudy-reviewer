@@ -1,5 +1,6 @@
 use mongodb::{Client, Database};
 
+#[derive(Clone)]
 pub struct MongoClient {
     client: Client,
     db: Database,

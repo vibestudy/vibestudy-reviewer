@@ -1,7 +1,7 @@
 use actix_web::{App, HttpServer, middleware, web};
 use api_server::api;
 use api_server::config::AppConfig;
-use api_server::db::{GradeRepository, MongoClient};
+use api_server::db::{GradeRepository, MongoClient, ReviewCacheRepository};
 use api_server::grade_orchestrator::GradeStore;
 use api_server::orchestrator::ReviewStore;
 use api_server::shutdown::shutdown_signal;
@@ -21,23 +21,30 @@ async fn main() -> std::io::Result<()> {
         .init();
 
     let config = AppConfig::from_env().expect("Failed to load configuration");
-    let review_store = ReviewStore::new(config.review.review_ttl_secs, Some(config.providers.clone()));
 
-    let grade_repo = if let Some(ref mongodb_url) = config.mongo.mongodb_url {
+    let (grade_repo, review_cache_repo) = if let Some(ref mongodb_url) = config.mongo.mongodb_url {
         match MongoClient::new(mongodb_url.expose_secret(), &config.mongo.mongodb_db_name).await {
             Ok(client) => {
-                tracing::info!("MongoDB connected for grade persistence");
-                Some(Arc::new(GradeRepository::new(client)))
+                tracing::info!("MongoDB connected for grade persistence and review cache");
+                let grade_repo = Arc::new(GradeRepository::new(client.clone()));
+                let review_cache_repo = Arc::new(ReviewCacheRepository::new(client));
+                (Some(grade_repo), Some(review_cache_repo))
             }
             Err(e) => {
-                tracing::warn!("Failed to connect to MongoDB: {}. Grade persistence disabled.", e);
-                None
+                tracing::warn!("Failed to connect to MongoDB: {}. Grade persistence and review cache disabled.", e);
+                (None, None)
             }
         }
     } else {
-        tracing::info!("MongoDB not configured. Grade persistence disabled.");
-        None
+        tracing::info!("MongoDB not configured. Grade persistence and review cache disabled.");
+        (None, None)
     };
+
+    let review_store = ReviewStore::new(
+        config.review.review_ttl_secs,
+        Some(config.providers.clone()),
+        review_cache_repo,
+    );
 
     let grade_store = GradeStore::new(
         config.review.review_ttl_secs,

@@ -10,6 +10,7 @@ use crate::ai::reviewers::{CodeOracle, ProductIdeasReviewer};
 use crate::ai::{CodeContext, Reviewer, Validator};
 use crate::checkers::run_all_checkers;
 use crate::config::ProvidersConfig;
+use crate::db::ReviewCacheRepository;
 use crate::error::ApiError;
 use crate::git::ClonedRepo;
 use crate::llm::openai::OpenAIClient;
@@ -63,14 +64,20 @@ pub struct ReviewStore {
     reviews: Arc<RwLock<HashMap<String, ReviewState>>>,
     ttl_secs: u64,
     providers_config: Option<ProvidersConfig>,
+    cache_repo: Option<Arc<ReviewCacheRepository>>,
 }
 
 impl ReviewStore {
-    pub fn new(ttl_secs: u64, providers_config: Option<ProvidersConfig>) -> Self {
+    pub fn new(
+        ttl_secs: u64,
+        providers_config: Option<ProvidersConfig>,
+        cache_repo: Option<Arc<ReviewCacheRepository>>,
+    ) -> Self {
         let store = Self {
             reviews: Arc::new(RwLock::new(HashMap::new())),
             ttl_secs,
             providers_config,
+            cache_repo,
         };
 
         let reviews = store.reviews.clone();
@@ -182,6 +189,17 @@ impl ReviewStore {
         let cloned_repo = ClonedRepo::from_url(&repo_url).await?;
         let repo_path = cloned_repo.path.clone();
 
+        let cache_key = cloned_repo.cache_key(&repo_url, None);
+        let commit_sha = cloned_repo.head_commit_short().unwrap_or_default();
+
+        if let (Some(ref cache_repo), Some(ref key)) = (&self.cache_repo, &cache_key) {
+            if let Ok(Some(cached)) = cache_repo.get(key).await {
+                tracing::info!("Cache hit for review: {}", key);
+                self.apply_cached_result(id, cached.results, cached.suggestions, start.elapsed().as_millis() as u64).await;
+                return Ok(());
+            }
+        }
+
         {
             let mut reviews = self.reviews.write().await;
             if let Some(state) = reviews.get_mut(id) {
@@ -230,6 +248,14 @@ impl ReviewStore {
             all_suggestions = suggestions;
         }
 
+        if let (Some(ref cache_repo), Some(ref key)) = (&self.cache_repo, &cache_key) {
+            if let Err(e) = cache_repo.save(key, &repo_url, &commit_sha, &all_diagnostics, &all_suggestions).await {
+                tracing::warn!("Failed to save review cache: {}", e);
+            } else {
+                tracing::info!("Saved review to cache: {}", key);
+            }
+        }
+
         {
             let mut reviews = self.reviews.write().await;
             if let Some(state) = reviews.get_mut(id) {
@@ -260,6 +286,26 @@ impl ReviewStore {
         }
 
         Ok(())
+    }
+
+    async fn apply_cached_result(&self, id: &str, results: Vec<Diagnostic>, suggestions: Vec<Suggestion>, duration_ms: u64) {
+        let mut reviews = self.reviews.write().await;
+        if let Some(state) = reviews.get_mut(id) {
+            state.results = results.clone();
+            state.suggestions = suggestions;
+            state.status = ReviewStatus::Completed;
+            state.emit(ReviewEvent::ReviewCompleted {
+                summary: ReviewSummary {
+                    total_diagnostics: results.len(),
+                    by_severity: SeverityCounts {
+                        error: results.iter().filter(|d| d.severity == crate::types::Severity::Error).count(),
+                        warning: results.iter().filter(|d| d.severity == crate::types::Severity::Warning).count(),
+                        info: results.iter().filter(|d| d.severity == crate::types::Severity::Info).count(),
+                    },
+                    duration_ms,
+                },
+            });
+        }
     }
 
     async fn run_ai_validators(
@@ -377,7 +423,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_and_get_review() {
-        let store = ReviewStore::new(3600, None);
+        let store = ReviewStore::new(3600, None, None);
         let id = store
             .create_review("https://github.com/test/repo".to_string())
             .await;
@@ -389,7 +435,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_subscribe() {
-        let store = ReviewStore::new(3600, None);
+        let store = ReviewStore::new(3600, None, None);
         let id = store
             .create_review("https://github.com/test/repo".to_string())
             .await;

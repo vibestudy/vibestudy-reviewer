@@ -43,7 +43,7 @@ async fn validate_github_repo(url: &str) -> Result<(), ApiError> {
     Ok(())
 }
 
-fn extract_github_info(url: &str) -> Option<(String, String)> {
+pub fn extract_github_info(url: &str) -> Option<(String, String)> {
     let url = url.trim_end_matches(".git");
     
     if url.contains("github.com") {
@@ -109,6 +109,23 @@ impl ClonedRepo {
             path,
             _temp_dir: None,
         })
+    }
+
+    /// Get the short (7-char) HEAD commit hash
+    pub fn head_commit_short(&self) -> Option<String> {
+        let repo = git2::Repository::open(&self.path).ok()?;
+        let head = repo.head().ok()?;
+        let commit = head.peel_to_commit().ok()?;
+        let full_hash = commit.id().to_string();
+        Some(full_hash[..7.min(full_hash.len())].to_string())
+    }
+
+    /// Generate a cache key for this repo: "owner/repo:branch:commit"
+    pub fn cache_key(&self, repo_url: &str, branch: Option<&str>) -> Option<String> {
+        let (owner, repo) = extract_github_info(repo_url)?;
+        let commit = self.head_commit_short()?;
+        let branch = branch.unwrap_or("main");
+        Some(format!("{}:{}:{}:{}", owner, repo, branch, commit))
     }
 }
 
