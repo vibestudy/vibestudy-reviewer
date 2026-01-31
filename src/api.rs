@@ -28,6 +28,7 @@ pub async fn create_review(
     tokio::spawn(async move {
         if let Err(e) = store_clone.run_review(&review_id_clone).await {
             tracing::error!("Review {} failed: {}", review_id_clone, e);
+            store_clone.mark_failed(&review_id_clone, e.to_string()).await;
         }
     });
 
@@ -51,6 +52,7 @@ pub async fn get_review(
         repo_url: state.repo_url.clone(),
         results: state.results.clone(),
         suggestions: state.suggestions.clone(),
+        error: state.error.clone(),
     }))
 }
 

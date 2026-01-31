@@ -25,6 +25,7 @@ pub struct ReviewState {
     pub repo_url: String,
     pub results: Vec<Diagnostic>,
     pub suggestions: Vec<Suggestion>,
+    pub error: Option<String>,
     pub created_at: u64,
     event_sender: broadcast::Sender<ReviewEvent>,
 }
@@ -38,6 +39,7 @@ impl ReviewState {
             repo_url,
             results: Vec::new(),
             suggestions: Vec::new(),
+            error: None,
             created_at: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
@@ -144,6 +146,7 @@ impl ReviewStore {
             repo_url: state.repo_url.clone(),
             results: state.results.clone(),
             suggestions: state.suggestions.clone(),
+            error: state.error.clone(),
             created_at: state.created_at,
             event_sender: state.event_sender.clone(),
         })
@@ -152,6 +155,15 @@ impl ReviewStore {
     pub async fn subscribe(&self, id: &str) -> Option<broadcast::Receiver<ReviewEvent>> {
         let reviews = self.reviews.read().await;
         reviews.get(id).map(|state| state.subscribe())
+    }
+
+    pub async fn mark_failed(&self, id: &str, error: String) {
+        let mut reviews = self.reviews.write().await;
+        if let Some(state) = reviews.get_mut(id) {
+            state.status = ReviewStatus::Failed;
+            state.error = Some(error.clone());
+            state.emit(ReviewEvent::ReviewFailed { error });
+        }
     }
 
     pub async fn run_review(&self, id: &str) -> Result<(), ApiError> {

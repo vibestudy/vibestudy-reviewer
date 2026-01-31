@@ -4,6 +4,61 @@ use tempfile::TempDir;
 use tokio::time::{timeout, Duration};
 
 const CLONE_TIMEOUT_SECS: u64 = 300;
+const VALIDATION_TIMEOUT_SECS: u64 = 10;
+
+async fn validate_github_repo(url: &str) -> Result<(), ApiError> {
+    let github_api_url = if let Some(captures) = extract_github_info(url) {
+        format!("https://api.github.com/repos/{}/{}", captures.0, captures.1)
+    } else {
+        return Ok(());
+    };
+
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(VALIDATION_TIMEOUT_SECS))
+        .build()
+        .map_err(|e| ApiError::GitError(format!("Failed to create HTTP client: {}", e)))?;
+
+    let response = client
+        .head(&github_api_url)
+        .header("User-Agent", "code-review-api")
+        .send()
+        .await
+        .map_err(|e| ApiError::GitError(format!("Failed to validate repository: {}", e)))?;
+
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        return Err(ApiError::GitError(format!(
+            "Repository not found: {}",
+            url
+        )));
+    }
+
+    if !response.status().is_success() && response.status() != reqwest::StatusCode::FORBIDDEN {
+        return Err(ApiError::GitError(format!(
+            "Failed to validate repository (status {}): {}",
+            response.status(),
+            url
+        )));
+    }
+
+    Ok(())
+}
+
+fn extract_github_info(url: &str) -> Option<(String, String)> {
+    let url = url.trim_end_matches(".git");
+    
+    if url.contains("github.com") {
+        let parts: Vec<&str> = url.split('/').collect();
+        if parts.len() >= 2 {
+            let repo = parts[parts.len() - 1];
+            let owner = parts[parts.len() - 2];
+            if !owner.is_empty() && !repo.is_empty() && owner != "github.com" {
+                return Some((owner.to_string(), repo.to_string()));
+            }
+        }
+    }
+    
+    None
+}
 
 pub struct ClonedRepo {
     pub path: PathBuf,
@@ -12,6 +67,8 @@ pub struct ClonedRepo {
 
 impl ClonedRepo {
     pub async fn from_url(url: &str) -> Result<Self, ApiError> {
+        validate_github_repo(url).await?;
+
         let temp_dir = TempDir::new()
             .map_err(|e| ApiError::GitError(format!("Failed to create temp dir: {}", e)))?;
 
@@ -69,5 +126,29 @@ mod tests {
     fn test_from_local_exists() {
         let result = ClonedRepo::from_local(PathBuf::from("."));
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_extract_github_info_junho_io_v2() {
+        let result = extract_github_info("https://github.com/junhoyeo/junho.io-v2");
+        assert_eq!(result, Some(("junhoyeo".to_string(), "junho.io-v2".to_string())));
+    }
+
+    #[test]
+    fn test_extract_github_info_tokscale() {
+        let result = extract_github_info("https://github.com/junhoyeo/tokscale");
+        assert_eq!(result, Some(("junhoyeo".to_string(), "tokscale".to_string())));
+    }
+
+    #[test]
+    fn test_extract_github_info_with_git_suffix() {
+        let result = extract_github_info("https://github.com/junhoyeo/tokscale.git");
+        assert_eq!(result, Some(("junhoyeo".to_string(), "tokscale".to_string())));
+    }
+
+    #[test]
+    fn test_extract_github_info_non_github() {
+        let result = extract_github_info("https://gitlab.com/owner/repo");
+        assert_eq!(result, None);
     }
 }

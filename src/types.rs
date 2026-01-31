@@ -148,6 +148,8 @@ pub struct ReviewResponse {
     pub repo_url: String,
     pub results: Vec<Diagnostic>,
     pub suggestions: Vec<Suggestion>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 #[cfg(test)]
