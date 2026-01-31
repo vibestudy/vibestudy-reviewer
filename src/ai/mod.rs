@@ -1,3 +1,4 @@
+pub mod graders;
 pub mod reviewers;
 pub mod validators;
 
