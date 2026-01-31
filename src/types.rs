@@ -268,6 +268,12 @@ pub struct GradeRequest {
     /// Optional metadata
     #[serde(default)]
     pub metadata: Option<GradeMetadata>,
+    /// Optional curriculum ID for linked grading
+    #[serde(default)]
+    pub curriculum_id: Option<String>,
+    /// Optional task ID for linked grading
+    #[serde(default)]
+    pub task_id: Option<String>,
 }
 
 // ----------------------------------------------------------------------------
