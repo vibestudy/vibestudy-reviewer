@@ -61,6 +61,10 @@ async-trait = "0.1.89"
 # Directory traversal
 walkdir = "2"
 
+# MongoDB
+mongodb = "3.0"
+bson = "2.9"
+
 [dev-dependencies]
 actix-test = "0.1"
 tokio-test = "0.4"

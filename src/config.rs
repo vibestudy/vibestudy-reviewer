@@ -1,11 +1,28 @@
 use crate::error::ConfigError;
 use secrecy::SecretString;
 
+// MongoDB configuration
+#[derive(Clone)]
+pub struct MongoConfig {
+    pub mongodb_url: Option<SecretString>,
+    pub mongodb_db_name: String,
+}
+
+impl Default for MongoConfig {
+    fn default() -> Self {
+        Self {
+            mongodb_url: None,
+            mongodb_db_name: "omakasem".to_string(),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct AppConfig {
     pub server: ServerConfig,
     pub providers: ProvidersConfig,
     pub review: ReviewConfig,
+    pub mongo: MongoConfig,
 }
 
 #[derive(Clone)]
@@ -70,6 +87,11 @@ impl AppConfig {
                     .parse()
                     .unwrap_or(3600),
                 max_repo_size_mb: 100,
+            },
+            mongo: MongoConfig {
+                mongodb_url: std::env::var("MONGODB_URL").ok().map(SecretString::from),
+                mongodb_db_name: std::env::var("MONGODB_DB_NAME")
+                    .unwrap_or_else(|_| "omakasem".to_string()),
             },
         })
     }
