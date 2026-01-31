@@ -2,6 +2,7 @@ pub mod ai;
 pub mod api;
 pub mod checkers;
 pub mod config;
+pub mod db;
 pub mod error;
 pub mod git;
 pub mod grade_orchestrator;
