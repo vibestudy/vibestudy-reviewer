@@ -127,6 +127,9 @@ impl GradeRepository {
         let curriculum_oid = ObjectId::parse_str(curriculum_id)
             .map_err(|e| mongodb::error::Error::custom(format!("Invalid curriculum_id: {}", e)))?;
 
+        let task_oid = ObjectId::parse_str(task_id)
+            .map_err(|e| mongodb::error::Error::custom(format!("Invalid task_id: {}", e)))?;
+
         let grade_result = TaskGradeUpdate {
             grade_job_id: report.id.clone(),
             score: report.overall_score,
@@ -159,7 +162,7 @@ impl GradeRepository {
         self.tasks_collection()
             .update_one(
                 doc! {
-                    "_id": task_id,
+                    "_id": task_oid,
                     "curriculum_id": curriculum_oid,
                 },
                 doc! {
