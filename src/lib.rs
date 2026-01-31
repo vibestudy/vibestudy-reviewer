@@ -4,6 +4,7 @@ pub mod checkers;
 pub mod config;
 pub mod error;
 pub mod git;
+pub mod grade_orchestrator;
 pub mod llm;
 pub mod orchestrator;
 pub mod shutdown;
