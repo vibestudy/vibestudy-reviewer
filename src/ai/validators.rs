@@ -220,7 +220,8 @@ impl Validator for Prioritizer {
 }
 
 const VALIDATOR_SYSTEM_PROMPT: &str = "You are a code review assistant. \
-    Respond ONLY with the requested JSON format. No explanations.";
+    Respond ONLY with the requested JSON format. No explanations. \
+    All text content in the JSON (messages, descriptions, suggestions) MUST be written in Korean.";
 
 fn severity_str(severity: Severity) -> &'static str {
     match severity {

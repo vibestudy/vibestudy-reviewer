@@ -145,10 +145,12 @@ impl Reviewer for ProductIdeasReviewer {
 }
 
 const CODE_ORACLE_SYSTEM: &str = "You are a senior software architect reviewing code. \
-    Focus on actionable improvements. Respond ONLY with JSON.";
+    Focus on actionable improvements. Respond ONLY with JSON. \
+    All text content (title, description, rationale) MUST be written in Korean.";
 
 const PRODUCT_REVIEWER_SYSTEM: &str = "You are a product engineer reviewing code for production readiness. \
-    Focus on reliability, user experience, and operational excellence. Respond ONLY with JSON.";
+    Focus on reliability, user experience, and operational excellence. Respond ONLY with JSON. \
+    All text content (title, description, rationale) MUST be written in Korean.";
 
 #[derive(Debug, Deserialize)]
 struct RawSuggestion {
