@@ -91,6 +91,7 @@ pub struct GradeStore {
     ttl_secs: u64,
     providers_config: Option<ProvidersConfig>,
     default_config: GradeConfig,
+    grade_repo: Option<Arc<crate::db::GradeRepository>>,
 }
 
 impl GradeStore {
@@ -98,12 +99,14 @@ impl GradeStore {
         ttl_secs: u64,
         providers_config: Option<ProvidersConfig>,
         default_config: GradeConfig,
+        grade_repo: Option<Arc<crate::db::GradeRepository>>,
     ) -> Self {
         let store = Self {
             grades: Arc::new(RwLock::new(HashMap::new())),
             ttl_secs,
             providers_config,
             default_config,
+            grade_repo,
         };
 
         Self::spawn_cleanup_task(store.grades.clone(), ttl_secs);
@@ -176,6 +179,19 @@ impl GradeStore {
 
         let mut grades = self.grades.write().await;
         grades.insert(id.clone(), state);
+
+        if let Some(ref repo) = self.grade_repo {
+            if let Err(e) = repo
+                .save_grade_job(
+                    &request,
+                    request.curriculum_id.clone(),
+                    request.task_id.clone(),
+                )
+                .await
+            {
+                tracing::error!("Failed to save grade job to MongoDB: {}", e);
+            }
+        }
 
         id
     }
@@ -271,6 +287,23 @@ impl GradeStore {
                     summary,
                     duration_ms: state.duration_ms,
                 });
+            }
+        }
+
+        if let Some(ref repo) = self.grade_repo {
+            let report = self.get_grade(id).await;
+            if let Some(report) = report {
+                if let Err(e) = repo.update_grade_job(id, &report).await {
+                    tracing::error!("Failed to update grade job in MongoDB: {}", e);
+                }
+
+                if let (Some(curriculum_id), Some(task_id)) =
+                    (&request.curriculum_id, &request.task_id)
+                {
+                    if let Err(e) = repo.update_task_grade(curriculum_id, task_id, &report).await {
+                        tracing::error!("Failed to update task grade in MongoDB: {}", e);
+                    }
+                }
             }
         }
 
@@ -522,7 +555,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_and_get_grade() {
-        let store = GradeStore::new(3600, None, GradeConfig::default());
+        let store = GradeStore::new(3600, None, GradeConfig::default(), None);
         let request = GradeRequest {
             repo_url: "https://github.com/test/repo".to_string(),
             branch: None,
@@ -538,6 +571,8 @@ mod tests {
             }],
             config: None,
             metadata: None,
+            curriculum_id: None,
+            task_id: None,
         };
 
         let id = store.create_grade(request).await;
@@ -551,13 +586,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_subscribe() {
-        let store = GradeStore::new(3600, None, GradeConfig::default());
+        let store = GradeStore::new(3600, None, GradeConfig::default(), None);
         let request = GradeRequest {
             repo_url: "https://github.com/test/repo".to_string(),
             branch: None,
             tasks: vec![],
             config: None,
             metadata: None,
+            curriculum_id: None,
+            task_id: None,
         };
 
         let id = store.create_grade(request).await;
